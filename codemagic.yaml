@@ -4,9 +4,9 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
-      # Capacitor CLI 8.6.2 требует node >= 22.0.0. "latest" может дать 25.x —
-      # берём LTS-ветку, чтобы сборка не сломалась от смены мажорной версии.
-      node: 22.14.0
+      # Capacitor CLI 8 требует node >= 22; latest этому соответствует.
+      # Точную версию печатает первый шаг — если станет слишком новой, будет видно.
+      node: latest
       xcode: latest
       cocoapods: default
       ios_signing:
@@ -16,29 +16,92 @@ workflows:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
     scripts:
-      - name: Проверка исходника и окружения
+      # ВАЖНО про устройство этого файла: оболочки Capacitor в репозитории НЕТ
+      # намеренно. Веб-интерфейс GitHub не умеет загружать папки (расплющивает их
+      # в корень), а ставить программы владельцу нельзя. Поэтому все файлы оболочки
+      # создаются прямо здесь, при сборке. В репозитории нужен один файл — Meritly.html.
+      - name: Проверка окружения
         script: |
           set -e
-          echo "repo: $(pwd)"
-          ls -la Meritly.html
+          echo "каталог сборки: $CM_BUILD_DIR"
+          ls -la
           node --version
+          npm --version
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+          test -f Meritly.html || { echo "ОТКАЗ: в репозитории нет Meritly.html"; exit 1; }
+          SZ=$(wc -c < Meritly.html | tr -d ' ')
+          echo "Meritly.html: $SZ байт"
+          test "$SZ" -gt 500000 || { echo "ОТКАЗ: Meritly.html подозрительно мал ($SZ байт)"; exit 1; }
 
-      - name: Установка зависимостей оболочки
+      - name: Создание оболочки Capacitor
         script: |
           set -e
+          mkdir -p app/tools
+          cat > app/package.json <<'EOF'
+          {
+            "name": "meritly-ios",
+            "private": true,
+            "version": "0.1.0",
+            "dependencies": {
+              "@capacitor/core": "8.6.2",
+              "@capacitor/ios": "8.6.2"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "8.6.2"
+            }
+          }
+          EOF
+          cat > app/capacitor.config.json <<'EOF'
+          {
+            "appId": "io.github.meritlygo",
+            "appName": "Meritly",
+            "webDir": "www",
+            "ios": { "contentInset": "never", "backgroundColor": "#ffffff" }
+          }
+          EOF
           cd app
           npm install --no-audit --no-fund
+          npx cap --version
 
       - name: Сборка www из Meritly.html
         script: |
           set -e
+          cat > app/tools/make-www.mjs <<'EOF'
+          import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+          import { dirname, join, resolve } from 'node:path';
+          import { fileURLToPath } from 'node:url';
+
+          const here = dirname(fileURLToPath(import.meta.url));
+          const appDir = resolve(here, '..');
+          const repo = resolve(appDir, '..');
+          const src = join(repo, 'Meritly.html');
+          const outDir = join(appDir, 'www');
+          const out = join(outDir, 'index.html');
+
+          const size = statSync(src).size;
+          if (size < 500000) {
+            console.error('OTKAZ: Meritly.html vsego ' + size + ' bayt');
+            process.exit(1);
+          }
+          const html = readFileSync(src, 'utf8');
+          if (!html.includes('</head>')) {
+            console.error('OTKAZ: v Meritly.html net </head>');
+            process.exit(1);
+          }
+          const stamp = '<!-- build ' + new Date().toISOString() + ' -->';
+          const i = html.indexOf('</head>');
+          const merged = html.slice(0, i) + stamp + html.slice(i);
+          mkdirSync(outDir, { recursive: true });
+          writeFileSync(out, merged, 'utf8');
+          const bytes = Buffer.byteLength(merged, 'utf8');
+          console.log('www sobran: ' + out + ' (' + bytes + ' bayt, istochnik ' + size + ')');
+          if (bytes < 500000) { console.error('OTKAZ: rezultat mal'); process.exit(1); }
+          EOF
           cd app
-          npm run www
+          node tools/make-www.mjs
           ls -la www
-          # Проверяем, что в сборке именно игра, а не пустая страница
-          node -e "const s=require('fs').readFileSync('www/index.html','utf8'); if(s.length<500000){throw new Error('www подозрительно мал')}; if(!s.includes('Meritly')){throw new Error('в www не Meritly')}; console.log('www ok, '+s.length+' символов')"
+          node -e "const s=require('fs').readFileSync('www/index.html','utf8'); if(!s.includes('Meritly'))throw new Error('v www ne Meritly'); if(/<script[^>]*src=/.test(s))throw new Error('v www vneshniy script'); console.log('www ok, '+s.length+' simvolov, vneshnih skriptov net')"
 
       - name: Добавление платформы iOS и синхронизация
         script: |
@@ -46,12 +109,15 @@ workflows:
           cd app
           npx cap add ios
           npx cap sync ios
+          test -d ios/App/App.xcodeproj || { echo "ОТКАЗ: проект Xcode не создан"; ls -la ios; exit 1; }
+          ls -la ios/App/App | head -30
 
-      - name: Правка Info.plist (разрешения и шифрование)
+      - name: Правка Info.plist (разрешения, только iPhone, шифрование)
         script: |
           set -e
           cd app
           PLIST=ios/App/App/Info.plist
+          test -f "$PLIST" || { echo "ОТКАЗ: нет $PLIST"; exit 1; }
           set_key () {
             KEY="$1"; VAL="$2"
             if /usr/libexec/PlistBuddy -c "Print :$KEY" "$PLIST" >/dev/null 2>&1; then
@@ -62,11 +128,9 @@ workflows:
           }
           set_key NSLocationWhenInUseUsageDescription "Ваш район, чтобы показать людей Meritly рядом. Точное место не показывается и не сохраняется."
           set_key NSPhotoLibraryUsageDescription "Фото для аватарки и фона доски. На сервер не загружается: остаётся на вашем телефоне. Попадает в картинку, только если вы сами нажмёте «Поделиться»."
-          # Только iPhone: иначе Apple требует скриншоты iPad и вёрстку под него
           /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" "$PLIST" >/dev/null 2>&1 || true
           /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 1" "$PLIST"
-          # Только стандартный HTTPS — шифрование не подпадает под исключения
           if /usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$PLIST" >/dev/null 2>&1; then
             /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
           else
@@ -75,35 +139,34 @@ workflows:
           plutil -lint "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :NSLocationWhenInUseUsageDescription" "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$PLIST"
 
-      - name: Иконка приложения (1024x1024, без прозрачности)
+      - name: Иконка приложения
         script: |
           set -e
           cd app
           SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
-          test -d "$SET" || { echo "ОТКАЗ: нет $SET"; exit 1; }
-          # Capacitor кладёт туда файл 1024x1024 под именем AppIcon-512@2x.png;
-          # эту же запись использует и одиночная иконка Xcode 26.
-          cp ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          if [ -f ../AppIcon-1024.png ]; then
+            cp ../AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+            W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
+            H=$(sips -g pixelHeight "$SET/AppIcon-512@2x.png" | awk '/pixelHeight/{print $2}')
+            A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
+            echo "иконка: ${W}x${H}, alpha=${A}"
+            test "$W" = "1024" && test "$H" = "1024" || { echo "ОТКАЗ: иконка не 1024x1024"; exit 1; }
+            test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
+          else
+            echo "AppIcon-1024.png в репозитории нет — остаётся стандартная иконка Capacitor."
+            echo "Для TestFlight этого достаточно; своя иконка нужна к карточке в App Store."
+          fi
           ls -la "$SET"
-          cat "$SET/Contents.json"
-          # Проверка без сторонних библиотек: на раннере нет PIL, а sips есть всегда.
-          # sips печатает "pixelWidth"/"pixelHeight"; hasAlpha=no — требование App Store.
-          sips -g pixelWidth -g pixelHeight -g hasAlpha -g format "$SET/AppIcon-512@2x.png"
-          W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
-          H=$(sips -g pixelHeight "$SET/AppIcon-512@2x.png" | awk '/pixelHeight/{print $2}')
-          A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
-          echo "иконка: ${W}x${H}, alpha=${A}"
-          test "$W" = "1024" && test "$H" = "1024" || { echo "ОТКАЗ: иконка не 1024x1024"; exit 1; }
-          test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
 
       - name: Подпись и сборка .ipa
         script: |
           set -e
           cd "$CM_BUILD_DIR/app"
           xcode-project use-profiles
-          # build-ipa сам делает archive + export. Отдельный xcodebuild archive здесь
-          # НЕ нужен: он бы собрал проект дважды и сжёг 2-4 минуты из 500 бесплатных.
+          # build-ipa сам делает archive + export: отдельный xcodebuild archive
+          # собрал бы проект дважды и сжёг 2-4 минуты из 500 бесплатных.
           xcode-project build-ipa \
             --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
@@ -111,7 +174,6 @@ workflows:
 
     artifacts:
       - app/build/ios/ipa/*.ipa
-      - app/build/**/*.xcarchive
       - app/www/index.html
       - /tmp/xcodebuild_logs/*.log
 
@@ -121,7 +183,5 @@ workflows:
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        expire_build_submission_when: 90d
-        # Автоматический выпуск для внешних тестеров не включаем:
-        # сначала проверяем на своём iPhone, потом решаем.
+        # Автоматический выпуск в магазин не включаем: сначала проверяем на телефоне.
         submit_to_app_store: false
