@@ -12,7 +12,9 @@ workflows:
     environment:
       # Capacitor CLI 8 требует node >= 22; точную версию печатает первый шаг.
       node: latest
-      xcode: latest
+      # Apple требует Xcode 26+ с SDK iOS 26 (с 28.04.2026). Именно 26.6,
+      # а не latest: latest однажды уедет на 27.x, и сборка сломается сама.
+      xcode: 26.6
       cocoapods: default
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
@@ -148,10 +150,18 @@ workflows:
           set -e
           cd app
           SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
-          if [ -f ios-assets/AppIcon-1024.png ]; then
-            cp ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
-          elif [ -f ../app/ios-assets/AppIcon-1024.png ]; then
-            cp ../app/ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          # Иконку ищем в трёх местах: рядом с оболочкой (app/ios-assets),
+          # в корне репозитория (куда проще всего загрузить через GitHub)
+          # и в app/app/ios-assets — на случай, если cap add создаст вложенность.
+          ICON=""
+          for P in ios-assets/AppIcon-1024.png ../AppIcon-1024.png ../app/ios-assets/AppIcon-1024.png; do
+            if [ -f "$P" ]; then ICON="$P"; break; fi
+          done
+          if [ -n "$ICON" ]; then
+            echo "иконка найдена: $ICON"
+            cp "$ICON" "$SET/AppIcon-512@2x.png"
+          else
+            echo "иконка не найдена (искали ios-assets/, ../, ../app/ios-assets/)"
           fi
           if [ -f "$SET/AppIcon-512@2x.png" ]; then
             W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
@@ -180,7 +190,11 @@ workflows:
             archive
           echo "--- что собралось ---"
           ls -la "$CM_BUILD_DIR/app/build/Meritly.xcarchive/Products/Applications/" || true
+          echo "--- размеры ---"
+          du -sh "$CM_BUILD_DIR/app/build/Meritly.xcarchive/Products/Applications/App.app" || true
           du -sh "$CM_BUILD_DIR/app/build/Meritly.xcarchive" || true
+          echo "--- игра внутри приложения ---"
+          ls -la "$CM_BUILD_DIR/app/build/Meritly.xcarchive/Products/Applications/App.app/public/" 2>/dev/null || true
 
     artifacts:
       - app/build/Meritly.xcarchive
@@ -197,7 +211,9 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       node: latest
-      xcode: latest
+      # Apple требует Xcode 26+ с SDK iOS 26 (с 28.04.2026). Именно 26.6,
+      # а не latest: latest однажды уедет на 27.x, и сборка сломается сама.
+      xcode: 26.6
       cocoapods: default
       ios_signing:
         distribution_type: app_store
@@ -334,10 +350,18 @@ workflows:
           set -e
           cd app
           SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
-          if [ -f ios-assets/AppIcon-1024.png ]; then
-            cp ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
-          elif [ -f ../app/ios-assets/AppIcon-1024.png ]; then
-            cp ../app/ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          # Иконку ищем в трёх местах: рядом с оболочкой (app/ios-assets),
+          # в корне репозитория (куда проще всего загрузить через GitHub)
+          # и в app/app/ios-assets — на случай, если cap add создаст вложенность.
+          ICON=""
+          for P in ios-assets/AppIcon-1024.png ../AppIcon-1024.png ../app/ios-assets/AppIcon-1024.png; do
+            if [ -f "$P" ]; then ICON="$P"; break; fi
+          done
+          if [ -n "$ICON" ]; then
+            echo "иконка найдена: $ICON"
+            cp "$ICON" "$SET/AppIcon-512@2x.png"
+          else
+            echo "иконка не найдена (искали ios-assets/, ../, ../app/ios-assets/)"
           fi
           if [ -f "$SET/AppIcon-512@2x.png" ]; then
             W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
