@@ -1,17 +1,19 @@
 workflows:
-  ios-testflight:
-    name: Meritly iOS — TestFlight
+  # ============================================================
+  # 1. ПРОВЕРКА СБОРКИ — работает БЕЗ аккаунта Apple.
+  #    Собирает приложение целиком, но не подписывает его.
+  #    Задача: убедиться, что вся подготовка верна, и узнать время сборки.
+  #    Установить на телефон такую сборку нельзя — для этого нужен пункт 2.
+  # ============================================================
+  ios-check:
+    name: "1. Проверка сборки (без Apple)"
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
-      # Capacitor CLI 8 требует node >= 22; latest этому соответствует.
-      # Точную версию печатает первый шаг — если станет слишком новой, будет видно.
+      # Capacitor CLI 8 требует node >= 22; точную версию печатает первый шаг.
       node: latest
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: io.github.meritlygo
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
@@ -146,8 +148,12 @@ workflows:
           set -e
           cd app
           SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
-          if [ -f ../AppIcon-1024.png ]; then
-            cp ../AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          if [ -f ios-assets/AppIcon-1024.png ]; then
+            cp ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          elif [ -f ../app/ios-assets/AppIcon-1024.png ]; then
+            cp ../app/ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          fi
+          if [ -f "$SET/AppIcon-512@2x.png" ]; then
             W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
             H=$(sips -g pixelHeight "$SET/AppIcon-512@2x.png" | awk '/pixelHeight/{print $2}')
             A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
@@ -155,10 +161,191 @@ workflows:
             test "$W" = "1024" && test "$H" = "1024" || { echo "ОТКАЗ: иконка не 1024x1024"; exit 1; }
             test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
           else
-            echo "AppIcon-1024.png в репозитории нет — остаётся стандартная иконка Capacitor."
-            echo "Для TestFlight этого достаточно; своя иконка нужна к карточке в App Store."
+            echo "AppIcon-1024.png в репозитории нет — останется стандартная иконка Capacitor."
           fi
           ls -la "$SET"
+
+      - name: Сборка без подписи (проверка, что проект iOS собирается)
+        script: |
+          set -e
+          cd app
+          # Подписи нет намеренно: аккаунт Apple ещё не оформлен.
+          # Такой архив нельзя поставить на телефон, но он доказывает, что
+          # проект, плагины и весь код игры собираются без ошибок.
+          xcodebuild -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$CM_BUILD_DIR/app/build/Meritly.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive
+          echo "--- что собралось ---"
+          ls -la "$CM_BUILD_DIR/app/build/Meritly.xcarchive/Products/Applications/" || true
+          du -sh "$CM_BUILD_DIR/app/build/Meritly.xcarchive" || true
+
+    artifacts:
+      - app/build/Meritly.xcarchive
+      - app/www/index.html
+      - /tmp/xcodebuild_logs/*.log
+
+  # ============================================================
+  # 2. TESTFLIGHT — нужен ОФОРМЛЕННЫЙ аккаунт Apple Developer.
+  #    Без него шаг подписи остановится с понятным текстом.
+  # ============================================================
+  ios-testflight:
+    name: "2. TestFlight (нужен аккаунт Apple)"
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      node: latest
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: io.github.meritlygo
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+    scripts:
+      - name: Проверка, что аккаунт Apple подключён
+        script: |
+          set -e
+          if [ -z "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
+            echo "======================================================"
+            echo "ОСТАНОВКА: ключ App Store Connect не подключён."
+            echo "Это не поломка кода: нужен оформленный аккаунт Apple Developer"
+            echo "(99 USD в год). Пока его нет, пользуйтесь сценарием"
+            echo "«1. Проверка сборки (без Apple)» — он работает без ключей."
+            echo "======================================================"
+            exit 1
+          fi
+          echo "ключ App Store Connect на месте"
+
+      - name: Проверка окружения
+        script: |
+          set -e
+          node --version
+          xcodebuild -version
+          ls -la
+          test -f Meritly.html || { echo "ОТКАЗ: нет Meritly.html"; exit 1; }
+
+      - name: Создание оболочки Capacitor
+        script: |
+          set -e
+          mkdir -p app/tools
+          cat > app/package.json <<'EOF'
+          {
+            "name": "meritly-ios",
+            "private": true,
+            "version": "0.1.0",
+            "dependencies": {
+              "@capacitor/core": "8.6.2",
+              "@capacitor/ios": "8.6.2"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "8.6.2"
+            }
+          }
+          EOF
+          cat > app/capacitor.config.json <<'EOF'
+          {
+            "appId": "io.github.meritlygo",
+            "appName": "Meritly",
+            "webDir": "www",
+            "ios": { "contentInset": "never", "backgroundColor": "#ffffff" }
+          }
+          EOF
+          cd app
+          npm install --no-audit --no-fund
+          npx cap --version
+
+      - name: Сборка www из Meritly.html
+        script: |
+          set -e
+          cat > app/tools/make-www.mjs <<'EOF'
+          import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+          import { dirname, join, resolve } from 'node:path';
+          import { fileURLToPath } from 'node:url';
+
+          const here = dirname(fileURLToPath(import.meta.url));
+          const appDir = resolve(here, '..');
+          const repo = resolve(appDir, '..');
+          const src = join(repo, 'Meritly.html');
+          const outDir = join(appDir, 'www');
+          const out = join(outDir, 'index.html');
+
+          const size = statSync(src).size;
+          if (size < 500000) {
+            console.error('OTKAZ: Meritly.html vsego ' + size + ' bayt');
+            process.exit(1);
+          }
+          const html = readFileSync(src, 'utf8');
+          if (!html.includes('</head>')) {
+            console.error('OTKAZ: v Meritly.html net </head>');
+            process.exit(1);
+          }
+          const stamp = '<!-- build ' + new Date().toISOString() + ' -->';
+          const i = html.indexOf('</head>');
+          const merged = html.slice(0, i) + stamp + html.slice(i);
+          mkdirSync(outDir, { recursive: true });
+          writeFileSync(out, merged, 'utf8');
+          const bytes = Buffer.byteLength(merged, 'utf8');
+          console.log('www sobran: ' + out + ' (' + bytes + ' bayt, istochnik ' + size + ')');
+          if (bytes < 500000) { console.error('OTKAZ: rezultat mal'); process.exit(1); }
+          EOF
+          cd app
+          node tools/make-www.mjs
+          node -e "const s=require('fs').readFileSync('www/index.html','utf8'); if(!s.includes('Meritly'))throw new Error('v www ne Meritly'); console.log('www ok, '+s.length+' simvolov')"
+
+      - name: Добавление платформы iOS и синхронизация
+        script: |
+          set -e
+          cd app
+          npx cap add ios
+          npx cap sync ios
+          test -d ios/App/App.xcodeproj || { echo "ОТКАЗ: проект Xcode не создан"; exit 1; }
+
+      - name: Правка Info.plist (разрешения, только iPhone, шифрование)
+        script: |
+          set -e
+          cd app
+          PLIST=ios/App/App/Info.plist
+          set_key () {
+            KEY="$1"; VAL="$2"
+            if /usr/libexec/PlistBuddy -c "Print :$KEY" "$PLIST" >/dev/null 2>&1; then
+              /usr/libexec/PlistBuddy -c "Set :$KEY $VAL" "$PLIST"
+            else
+              /usr/libexec/PlistBuddy -c "Add :$KEY string $VAL" "$PLIST"
+            fi
+          }
+          set_key NSLocationWhenInUseUsageDescription "Ваш район, чтобы показать людей Meritly рядом. Точное место не показывается и не сохраняется."
+          set_key NSPhotoLibraryUsageDescription "Фото для аватарки и фона доски. На сервер не загружается: остаётся на вашем телефоне. Попадает в картинку, только если вы сами нажмёте «Поделиться»."
+          /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" "$PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 1" "$PLIST"
+          if /usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$PLIST" >/dev/null 2>&1; then
+            /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
+          else
+            /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST"
+          fi
+          plutil -lint "$PLIST"
+
+      - name: Иконка приложения
+        script: |
+          set -e
+          cd app
+          SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
+          if [ -f ios-assets/AppIcon-1024.png ]; then
+            cp ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          elif [ -f ../app/ios-assets/AppIcon-1024.png ]; then
+            cp ../app/ios-assets/AppIcon-1024.png "$SET/AppIcon-512@2x.png"
+          fi
+          if [ -f "$SET/AppIcon-512@2x.png" ]; then
+            W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
+            A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
+            echo "иконка: ${W}px, alpha=${A}"
+            test "$W" = "1024" || { echo "ОТКАЗ: иконка не 1024"; exit 1; }
+            test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
+          fi
 
       - name: Подпись и сборка .ipa
         script: |
