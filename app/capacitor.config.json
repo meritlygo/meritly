@@ -1,0 +1,9 @@
+{
+  "appId": "io.github.meritlygo",
+  "appName": "Meritly",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#ffffff"
+  }
+}
