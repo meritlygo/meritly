@@ -49,7 +49,8 @@ workflows:
             "version": "0.1.0",
             "dependencies": {
               "@capacitor/core": "8.6.2",
-              "@capacitor/ios": "8.6.2"
+              "@capacitor/ios": "8.6.2",
+              "@capacitor/preferences": "8.0.1"
             },
             "devDependencies": {
               "@capacitor/cli": "8.6.2"
@@ -61,7 +62,7 @@ workflows:
             "appId": "io.github.meritlygo",
             "appName": "Meritly",
             "webDir": "www",
-            "ios": { "contentInset": "never", "backgroundColor": "#ffffff" }
+            "ios": { "contentInset": "never", "backgroundColor": "#0F3473" }
           }
           EOF
           cd app
@@ -150,29 +151,39 @@ workflows:
           set -e
           cd app
           SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
-          # Иконку ищем в трёх местах: рядом с оболочкой (app/ios-assets),
-          # в корне репозитория (куда проще всего загрузить через GitHub)
-          # и в app/app/ios-assets — на случай, если cap add создаст вложенность.
+          # Иконку берём ИЗ КОРНЯ репозитория: там единственный источник правды.
+          # app/ios-assets стоит вторым — на случай, если корневую уберут.
+          # ПОРЯДОК ВАЖЕН: раньше первым стоял ios-assets, а в нём лежала СТАРАЯ
+          # песочная иконка (1024x1024, без прозрачности — то есть все проверки
+          # ниже её пропускали), и сборка молча ставила её вместо тёмно-синей.
+          # Поэтому старая иконка ещё и отвергается по отпечатку, а не по имени.
+          OLD_SHA=c420048dbf73d5358e6c6d1fd7e04799b05ae18f7e61fb9292494365ed558213
           ICON=""
-          for P in ios-assets/AppIcon-1024.png ../AppIcon-1024.png ../app/ios-assets/AppIcon-1024.png; do
-            if [ -f "$P" ]; then ICON="$P"; break; fi
+          for P in ../AppIcon-1024.png ios-assets/AppIcon-1024.png ../app/ios-assets/AppIcon-1024.png; do
+            if [ -f "$P" ]; then
+              S=$(shasum -a 256 "$P" | awk '{print $1}')
+              if [ "$S" = "$OLD_SHA" ]; then
+                echo "ПРОПУСК: $P — это СТАРАЯ песочная иконка (отпечаток совпал)"
+                continue
+              fi
+              ICON="$P"; break
+            fi
           done
           if [ -n "$ICON" ]; then
             echo "иконка найдена: $ICON"
+            shasum -a 256 "$ICON"
             cp "$ICON" "$SET/AppIcon-512@2x.png"
           else
-            echo "иконка не найдена (искали ios-assets/, ../, ../app/ios-assets/)"
+            echo "ОТКАЗ: иконки нет — искали ../AppIcon-1024.png, ios-assets/, ../app/ios-assets/"
+            echo "Приложению нужна иконка 1024x1024 без прозрачности в КОРНЕ репозитория."
+            exit 1
           fi
-          if [ -f "$SET/AppIcon-512@2x.png" ]; then
-            W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
-            H=$(sips -g pixelHeight "$SET/AppIcon-512@2x.png" | awk '/pixelHeight/{print $2}')
-            A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
-            echo "иконка: ${W}x${H}, alpha=${A}"
-            test "$W" = "1024" && test "$H" = "1024" || { echo "ОТКАЗ: иконка не 1024x1024"; exit 1; }
-            test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
-          else
-            echo "AppIcon-1024.png в репозитории нет — останется стандартная иконка Capacitor."
-          fi
+          W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
+          H=$(sips -g pixelHeight "$SET/AppIcon-512@2x.png" | awk '/pixelHeight/{print $2}')
+          A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
+          echo "иконка: ${W}x${H}, alpha=${A}"
+          test "$W" = "1024" && test "$H" = "1024" || { echo "ОТКАЗ: иконка не 1024x1024"; exit 1; }
+          test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
           ls -la "$SET"
 
       - name: Сборка без подписи (проверка, что проект iOS собирается)
@@ -255,7 +266,8 @@ workflows:
             "version": "0.1.0",
             "dependencies": {
               "@capacitor/core": "8.6.2",
-              "@capacitor/ios": "8.6.2"
+              "@capacitor/ios": "8.6.2",
+              "@capacitor/preferences": "8.0.1"
             },
             "devDependencies": {
               "@capacitor/cli": "8.6.2"
@@ -267,7 +279,7 @@ workflows:
             "appId": "io.github.meritlygo",
             "appName": "Meritly",
             "webDir": "www",
-            "ios": { "contentInset": "never", "backgroundColor": "#ffffff" }
+            "ios": { "contentInset": "never", "backgroundColor": "#0F3473" }
           }
           EOF
           cd app
@@ -350,26 +362,40 @@ workflows:
           set -e
           cd app
           SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
-          # Иконку ищем в трёх местах: рядом с оболочкой (app/ios-assets),
-          # в корне репозитория (куда проще всего загрузить через GitHub)
-          # и в app/app/ios-assets — на случай, если cap add создаст вложенность.
+          # Иконку берём ИЗ КОРНЯ репозитория: там единственный источник правды.
+          # app/ios-assets стоит вторым — на случай, если корневую уберут.
+          # ПОРЯДОК ВАЖЕН: раньше первым стоял ios-assets, а в нём лежала СТАРАЯ
+          # песочная иконка (1024x1024, без прозрачности — то есть все проверки
+          # ниже её пропускали), и сборка молча ставила её вместо тёмно-синей.
+          # Поэтому старая иконка ещё и отвергается по отпечатку, а не по имени.
+          OLD_SHA=c420048dbf73d5358e6c6d1fd7e04799b05ae18f7e61fb9292494365ed558213
           ICON=""
-          for P in ios-assets/AppIcon-1024.png ../AppIcon-1024.png ../app/ios-assets/AppIcon-1024.png; do
-            if [ -f "$P" ]; then ICON="$P"; break; fi
+          for P in ../AppIcon-1024.png ios-assets/AppIcon-1024.png ../app/ios-assets/AppIcon-1024.png; do
+            if [ -f "$P" ]; then
+              S=$(shasum -a 256 "$P" | awk '{print $1}')
+              if [ "$S" = "$OLD_SHA" ]; then
+                echo "ПРОПУСК: $P — это СТАРАЯ песочная иконка (отпечаток совпал)"
+                continue
+              fi
+              ICON="$P"; break
+            fi
           done
           if [ -n "$ICON" ]; then
             echo "иконка найдена: $ICON"
+            shasum -a 256 "$ICON"
             cp "$ICON" "$SET/AppIcon-512@2x.png"
           else
-            echo "иконка не найдена (искали ios-assets/, ../, ../app/ios-assets/)"
+            echo "ОТКАЗ: иконки нет — искали ../AppIcon-1024.png, ios-assets/, ../app/ios-assets/"
+            echo "Приложению нужна иконка 1024x1024 без прозрачности в КОРНЕ репозитория."
+            exit 1
           fi
-          if [ -f "$SET/AppIcon-512@2x.png" ]; then
-            W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
-            A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
-            echo "иконка: ${W}px, alpha=${A}"
-            test "$W" = "1024" || { echo "ОТКАЗ: иконка не 1024"; exit 1; }
-            test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
-          fi
+          W=$(sips -g pixelWidth  "$SET/AppIcon-512@2x.png" | awk '/pixelWidth/{print $2}')
+          H=$(sips -g pixelHeight "$SET/AppIcon-512@2x.png" | awk '/pixelHeight/{print $2}')
+          A=$(sips -g hasAlpha    "$SET/AppIcon-512@2x.png" | awk '/hasAlpha/{print $2}')
+          echo "иконка: ${W}x${H}, alpha=${A}"
+          test "$W" = "1024" && test "$H" = "1024" || { echo "ОТКАЗ: иконка не 1024x1024"; exit 1; }
+          test "$A" = "no" || { echo "ОТКАЗ: у иконки есть прозрачность"; exit 1; }
+          ls -la "$SET"
 
       - name: Подпись и сборка .ipa
         script: |
