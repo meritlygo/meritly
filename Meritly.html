@@ -257,8 +257,10 @@ button.lk:active{transform:scale(.98)}
 .icard{display:flex; flex-direction:column; gap:8px; text-align:left; min-width:0}
 .tile{position:relative; aspect-ratio:1; border-radius:18px; background:color-mix(in oklab,var(--c) 20%,var(--card)); display:grid; place-items:center; overflow:hidden}
 .tile svg{width:72%; height:72%}
+.tile img.art{width:76%; height:76%; object-fit:contain; display:block}
 .tile.big{border-radius:22px; aspect-ratio:16/9}
 .tile.big svg{width:auto; height:84%; aspect-ratio:1}
+.tile.big img.art{width:auto; height:82%; max-width:92%; object-fit:contain}
 .mine,.own,.off{z-index:1}
 .pips{position:absolute; left:8px; bottom:8px; display:flex; gap:3px}
 .pips b{width:6px; height:6px; border-radius:50%; border:1px solid var(--muted); opacity:.7}
@@ -1655,6 +1657,9 @@ const RAW = [
 ];
 const ITEMS = RAW.map(r => ({ id: r[0], n: r[1], b: r[2], cat: r[3], cl: r[4], p: r[5], g: r[6], col: r[7], sx: r[8], slot: WEAR[r[6]] || null }));
 const ITEM = {}; ITEMS.forEach(i => ITEM[i.id] = i);
+/* картинки вещей: id → data:URI (вставляются пачками; нет картинки — рисуется SVG, как было) */
+const ART = {};
+function artOf(it) { return it && ART[it.id] ? ART[it.id] : ''; }
 
 function glyph(g, c) {
   const dark = lum(c) < .3;
@@ -1700,7 +1705,9 @@ function glyph(g, c) {
   return `<circle cx="50" cy="50" r="30" ${F}/>`;
 }
 function tile(it, cls, pips) {
-  return `<div class="tile ${cls || ''}" style="--c:${it.col}"><svg viewBox="0 0 100 100" aria-hidden="true">${glyph(it.g, it.col)}</svg>` +
+  const art = artOf(it);
+  return `<div class="tile ${cls || ''}" style="--c:${it.col}">` +
+    (art ? `<img class="art" src="${art}" alt="" loading="lazy" decoding="async" draggable="false">` : `<svg viewBox="0 0 100 100" aria-hidden="true">${glyph(it.g, it.col)}</svg>`) +
     (pips ? `<span class="pips" title="Класс ${it.cl}">${[1, 2, 3, 4, 5].map(i => `<b class="${i <= it.cl ? 'on' : ''}"></b>`).join('')}</span>` : '') + `</div>`;
 }
 
@@ -2305,7 +2312,7 @@ function renderNearby(el) {
          с сервера. Метры не показываются ни там, ни там. */
       const dtxt = p.real ? nearDistTxt(p.dist) : (p.dist || 'больше 5 км');
       const nm = esc(p.n);
-      return `<div class="near">${personAva(id)}<span class="rt"><b style="font-weight:600">${nm}</b><small>${styleName(p.style)} · ${dtxt}</small></span><div class="acts">${sentOk ? `<span class="pill">Отправлено</span>` : `<button class="btn sm pri" data-act="invite" data-f="${id}" ${so.invToday >= 3 ? 'disabled' : ''}>Дружить</button>`}<button class="btn sm ghost" data-act="reportP" data-f="${id}" aria-label="Пожаловаться на ${nm}">${ico('flag', 'sm')}</button><button class="btn sm ghost" data-act="blockP" data-f="${id}" aria-label="Заблокировать ${nm}">${ico('ban', 'sm')}</button></div></div>`;
+      return `<div class="near">${personAva(id)}<span class="rt"><b style="font-weight:600">${nm}</b><small>${styleName(p.style)} · ${dtxt}</small></span><div class="acts">${sentOk ? `<span class="pill">Отправлено</span>` : `<button class="btn sm pri" data-act="invite" data-f="${id}" data-via="near" ${so.invToday >= 3 ? 'disabled' : ''}>Дружить</button>`}<button class="btn sm ghost" data-act="reportP" data-f="${id}" aria-label="Пожаловаться на ${nm}">${ico('flag', 'sm')}</button><button class="btn sm ghost" data-act="blockP" data-f="${id}" aria-label="Заблокировать ${nm}">${ico('ban', 'sm')}</button></div></div>`;
     }).join('') + `</div>` : `<div class="empty"><b>${loading ? 'Ищем' : 'Пока никого'}</b>${loading ? 'Смотрим, кто включил карточку рядом.' : (serverOn() ? 'Рядом пока никого: карточку видят только те, кто включил её сам. Загляни позже.' : 'Включи карточку, чтобы видеть других и стать видимым.')}</div>`;
     if (!loading) h += `<p class="note" style="margin-top:8px">Приглашений в день: ${so.invToday} из 3. Открытого чата с незнакомыми нет.${serverOn() ? ' Расстояние показывается диапазоном, точное место — никогда.' : ''}</p>`;
     const inc = (so.incoming || []).filter(id => PEOPLE[id] && !so.friends.includes(id) && !isBlocked(id));
@@ -3483,7 +3490,12 @@ const SRV_LG = { note: '' };
 const SRV_FR_ERR = {
   self: 'Себя приглашать не нужно',
   no_player: 'Такого игрока нет',
+  /* Два РАЗНЫХ отказа (bug-53). Раньше оба звучали как «он выключил поиск по
+     логину» — и в «Рядом» это было ложью: человек ничего не выключал, он
+     просто не включал поиск, который к «Рядом» отношения не имеет. */
   find_off: 'Этот игрок не принимает приглашения: он выключил поиск по логину',
+  not_near: 'Этого игрока сейчас нет в «Рядом»: он убрал свою карточку',
+  bad_via: 'Не удалось отправить приглашение. Попробуй ещё раз',
   blocked: 'Не получилось отправить приглашение',
   already: 'Вы уже друзья',
   no_invite: 'Приглашение больше не действует',
@@ -3968,11 +3980,15 @@ function srvNearLoad(done) {
 
 /* Приглашение. Локально помечаем сразу, а сервер — единственный, кто решает,
    снимает локальную пометку, иначе игрок считал бы приглашение отправленным. */
-function srvInvite(playerId, onDone) {
+function srvInvite(playerId, onDone, via) {
   const id = peerIdOf(playerId);
   if (!serverOn()) { if (onDone) onDone('off', ''); return; }
   if (SRV.banned) { if (onDone) onDone('banned', SRV.banned); return; }
-  const body = { targetId: playerId };
+  /* Откуда приглашение. Сервер проверяет эти пути ПО-РАЗНОМУ (bug-53):
+     из «Рядом» достаточно включённой карточки, по логину нужен findable.
+     Без via сервер отказывает: угадывать за клиента нельзя. По умолчанию
+     'login' — это прежнее поведение, поэтому старые вызовы не ломаются. */
+  const body = { targetId: playerId, via: via === 'near' ? 'near' : 'login' };
   srvReady().then(ok => {
     if (!ok) {
       if (SRV.banned) { if (onDone) onDone('banned', SRV.banned); return; }
@@ -4792,9 +4808,16 @@ const MORE_ACT = {
     const p = PEOPLE[id] || {};
     S.soc.inv[id] = 'sent'; S.soc.invToday++;
     const okMsg = 'Приглашение отправлено. Общение откроется, если человек согласится';
+    /* Откуда приглашение, решает САМА КНОПКА: data-via="near" стоит у «Дружить»
+       в разделе «Рядом», у кнопки в поиске по логину атрибута нет — значит
+       'login'. Обе кнопки зовут эту же функцию (ACT собирается из MORE_ACT),
+       поэтому различать их можно только по разметке. */
+    const via = el.dataset.via === 'near' ? 'near' : 'login';
     /* Без сервера поведение прежнее: приглашение ставится локально. С сервером
        он один решает, можно ли звать, — и при отказе пометка снимается:
-       обещать отправленное приглашение, которого нет, значит обмануть. */
+       обещать отправленное приглашение, которого нет, значит обмануть.
+       via='near' — этот путь принадлежит разделу «Рядом»: там человек уже
+       показал себя карточкой, и поиск по логину для приглашения не нужен. */
     if (!p.real) { MSG.push(okMsg); return commit(); }
     srvInvite(p.pid, (state, why) => {
       /* ok — сервер принял; queued — нет сети, приглашение в очереди;
@@ -4802,13 +4825,14 @@ const MORE_ACT = {
       if (state === 'ok' || state === 'off') { MSG.push(okMsg); return commit(); }
       if (state === 'queued') { MSG.push('Нет связи: приглашение уйдёт, когда появится сеть'); return commit(); }
       if (state === 'banned') { MSG.push(why || 'Доступ к серверу закрыт'); return commit(); }
-      /* Сервер отказал (лимит, блокировка, поиск выключен) — снимаем пометку и
-         возвращаем потраченную попытку: на сервере она не израсходована. */
+      /* Сервер отказал (лимит, блокировка, карточка убрана) — снимаем
+         пометку и возвращаем потраченную попытку: на сервере она не
+         израсходована. */
       delete S.soc.inv[id];
       S.soc.invToday = Math.max(0, S.soc.invToday - 1);
       MSG.push(why || 'Приглашение не отправлено');
       commit();
-    });
+    }, via);
   },
   unblockP(el) {
     const id = el.dataset.f; S.soc.blocked = (S.soc.blocked || []).filter(x => x !== id);
@@ -6789,8 +6813,9 @@ async function boardImageData(b) {
       g.shadowColor = 'transparent'; g.shadowBlur = 0; g.shadowOffsetY = 0;
       g.fillStyle = mixWhite(it.col, .22);
       rr(g, -w / 2 + w * .03, -total / 2 + w * .03, w - w * .06, th - w * .06, w * .015); g.fill();
-      if (!cache[it.g]) cache[it.g] = await loadImg(svgURL(glyph(it.g, it.col)));
-      const gl = cache[it.g];
+      const art = artOf(it), akey = art ? 'art:' + it.id : 'g:' + it.g;
+      if (!cache[akey]) cache[akey] = await loadImg(art || svgURL(glyph(it.g, it.col)));
+      const gl = cache[akey];
       if (gl) g.drawImage(gl, -w / 2 + w * .07, -total / 2 + w * .07, w - w * .14, th - w * .14);
       g.fillStyle = '#1B1D26'; g.font = `500 ${cap * .78}px ${SHARE_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(String(it.b || '').slice(0, 22), 0, total / 2 - cap * .55);
@@ -7453,7 +7478,7 @@ function renderSheet() {
       `<div class="field" style="margin-top:14px"><span class="lb">Мой стиль</span><div class="chips bleed" role="group" aria-label="Мой стиль">${styleChips()}</div></div>` +
       `<div class="field"><label for="pname">Имя</label><input type="text" id="pname" data-ch="name" maxlength="20" value="${esc(S.ch.name)}" autocomplete="off"><div class="nrow"><span id="nerr" class="${nameMsg(S.ch.name) ? 'err' : ''}">${nameMsg(S.ch.name) || NAME_HELP}</span><span class="num" id="ncnt">${tidy(S.ch.name).length} из 20</span></div></div>` +
       `<div class="field"><label for="pbio">О себе</label><textarea id="pbio" data-ch="bio" rows="2" maxlength="${BIO_MAX}" placeholder="Например, твой возраст" autocomplete="off" enterkeyhint="done">${esc(S.ch.bio || '')}</textarea><div class="nrow"><span id="bhelp">${BIO_HELP}</span><span class="num" id="bcnt">${(S.ch.bio || '').length} из ${BIO_MAX}</span></div></div>` +
-      `<div class="list" style="margin-bottom:6px">${toggleRow('tgNear', !!S.soc.nearby, 'Люди рядом', S.soc.nearby ? 'Карточка видна другим. Выключить раздел можно здесь' : (S.soc.adult ? 'Раздел готов, карточка сейчас скрыта' : 'Раздел выключен. Только с 18 лет'))}${toggleRow('tipsTog', S.tips, 'Подсказки', 'Короткие пояснения при первом знакомстве с экраном')}</div>` +
+      `<div class="list" style="margin-bottom:6px">${toggleRow('tipsTog', S.tips, 'Подсказки', 'Короткие пояснения при первом знакомстве с экраном')}</div>` +
       `<button class="btn sm" style="margin-bottom:10px" data-act="tipsReset">Показать подсказки заново</button>` +
       `<p class="note" style="margin-top:4px">Фото и текст «О себе» видят только друзья. Незнакомым игрокам в разделе «Рядом» показывается буква, а не фото. Фото хранится на этом устройстве.</p>` +
       `<div class="acts"><button class="btn pri" id="cnext" data-act="profileDone" ${nameCheck(S.ch.name) ? 'disabled' : ''}>Готово</button></div>`;
