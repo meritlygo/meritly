@@ -2068,6 +2068,24 @@ const unreadN = () => {
    Считаются отдельно от сообщений, но значок на вкладке «Друзья» общий. */
 const inviteList = () => (S.soc.incoming || []).filter(id => PEOPLE[id] && !S.soc.friends.includes(id) && !isBlocked(id));
 const inviteN = () => inviteList().length;
+/* Заявки в друзья — ОДИН блок на два экрана: «Рядом» и «Друзья».
+   До 2026-11-23 этот блок рисовался ТОЛЬКО в «Рядом», а «Рядом» показывает
+   заявки лишь при ВКЛЮЧЁННОЙ карточке. Значок на вкладке «Друзья» при этом
+   считает заявки всегда (inviteN считает S.soc.incoming без этой оговорки),
+   поэтому у игрока с выключенной карточкой висел «1», который некуда было
+   нажать: на «Друзьях» заявок нет, в «Рядом» — «Карточка скрыта». Проверено
+   стендом (stand-deadbadge: значок 1, а увидеть и принять заявку негде).
+   withDist — показывать ли расстояние: в «Рядом» оно уместно, на «Друзьях» нет. */
+function inviteCardsHTML(withDist) {
+  const so = S.soc;
+  const inc = (so.incoming || []).filter(id => PEOPLE[id] && !so.friends.includes(id) && !isBlocked(id));
+  if (!inc.length) return '';
+  return `<div class="sec"><span>Тебе предлагают дружбу</span><span class="num">${inc.length}</span></div><div class="list">` + inc.map(id => {
+    const p = PEOPLE[id], nm = esc(p.n);
+    const dtxt = withDist ? (p.real ? nearDistTxt(p.dist) : (p.dist || 'больше 5 км')) : '';
+    return `<div class="near">${personAva(id)}<span class="rt"><b style="font-weight:600">${nm}</b><small>${styleName(p.style)}${dtxt ? ' · ' + dtxt : ''} · хочет дружить</small></span><div class="acts"><button class="btn sm" data-act="declineInv" data-f="${id}">Нет</button><button class="btn pri sm" data-act="acceptInv" data-f="${id}">Принять</button><button class="btn sm ghost" data-act="reportP" data-f="${id}" aria-label="Пожаловаться на ${nm}">${ico('flag', 'sm')}</button><button class="btn sm ghost" data-act="blockP" data-f="${id}" aria-label="Заблокировать ${nm}">${ico('ban', 'sm')}</button></div></div>`;
+  }).join('') + `</div>`;
+}
 const sameDay = (a, b) => a.toDateString() === b.toDateString();
 function msgDay(ts) { const d = new Date(ts), n = new Date(), y = new Date(); y.setDate(n.getDate() - 1); return sameDay(d, n) ? 'Сегодня' : sameDay(d, y) ? 'Вчера' : `${d.getDate()} ${MONTHS_G[d.getMonth()]}${d.getFullYear() !== n.getFullYear() ? ' ' + d.getFullYear() : ''}`; }
 const msgHM = ts => { const d = new Date(ts); return `${d.getHours()}:${pad2(d.getMinutes())}`; };
@@ -2209,6 +2227,12 @@ function renderFriends(el) {
   const fr = S.soc.friends.filter(id => PEOPLE[id] && (!serverOn() || PEOPLE[id].real));
   let h = `<div class="head"><h2 class="h">Друзья</h2></div>`;
   h += chatListHTML();
+  /* Заявки в друзья. Значок на этой самой вкладке считается по ним (inviteN),
+     поэтому увидеть и принять их игрок должен ИМЕННО ЗДЕСЬ: в «Рядом» блок
+     заявок есть только при включённой карточке, а она по умолчанию выключена —
+     значок «1» вёл в пустоту (проверено стендом stand-deadbadge). Расстояния
+     на этом экране нет: оно уместно в «Рядом», а не в списке друзей. */
+  h += inviteCardsHTML(false);
   const inv = `<div class="invite"><div><b class="h" style="font-size:16px">Позови друга</b><p class="sub" style="margin-top:4px;color:var(--ink);opacity:.75">Друзья добавляются по ссылке, коду или точному логину. Искать человека по имени нельзя, поэтому незнакомый не сможет написать первым.</p></div><div class="code num">${esc(inviteCode())}</div><div class="r"><button class="btn pri sm" data-act="copyLink">${ico('link', 'sm')}Скопировать ссылку</button><button class="btn sm" data-act="codeOpen">${ico('userplus', 'sm')}Ввести код</button></div></div>`;
   h += `<div class="sec"><span>Мои друзья</span><span class="num">${fr.length}</span></div>`;
   if (fr.length) h += `<div class="list">${fr.map(id => { const p = PEOPLE[id]; return `<button class="fr" data-act="nav" data-t="friend" data-f="${id}">${personAva(id)}<span class="rt"><b>${p.n}</b><small>${styleName(p.style)} · ${p.open ? 'доска открыта' : 'доска закрыта'}</small></span><span class="go" style="color:var(--muted)">${ico('chev', 'sm')}</span></button>`; }).join('')}</div>`;
@@ -2321,12 +2345,9 @@ function renderNearby(el) {
       return `<div class="near">${personAva(id)}<span class="rt"><b style="font-weight:600">${nm}</b><small>${styleName(p.style)} · ${dtxt}</small></span><div class="acts">${sentOk ? `<span class="pill">Отправлено</span>` : `<button class="btn sm pri" data-act="invite" data-f="${id}" data-via="near" ${so.invToday >= 3 ? 'disabled' : ''}>Дружить</button>`}<button class="btn sm ghost" data-act="reportP" data-f="${id}" aria-label="Пожаловаться на ${nm}">${ico('flag', 'sm')}</button><button class="btn sm ghost" data-act="blockP" data-f="${id}" aria-label="Заблокировать ${nm}">${ico('ban', 'sm')}</button></div></div>`;
     }).join('') + `</div>` : `<div class="empty"><b>${loading ? 'Ищем' : 'Пока никого'}</b>${loading ? 'Смотрим, кто включил карточку рядом.' : (serverOn() ? 'Рядом пока никого: карточку видят только те, кто включил её сам. Загляни позже.' : 'Включи карточку, чтобы видеть других и стать видимым.')}</div>`;
     if (!loading) h += `<p class="note" style="margin-top:8px">Приглашений в день: ${so.invToday} из 3. Открытого чата с незнакомыми нет.${serverOn() ? ' Расстояние показывается диапазоном, точное место — никогда.' : ''}</p>`;
-    const inc = (so.incoming || []).filter(id => PEOPLE[id] && !so.friends.includes(id) && !isBlocked(id));
-    if (inc.length) h += `<div class="sec"><span>Тебе предлагают дружбу</span></div><div class="list">` + inc.map(id => {
-      const p = PEOPLE[id], nm = esc(p.n);
-      const dtxt = p.real ? nearDistTxt(p.dist) : (p.dist || 'больше 5 км');
-      return `<div class="near">${personAva(id)}<span class="rt"><b style="font-weight:600">${nm}</b><small>${styleName(p.style)} · ${dtxt} · хочет дружить</small></span><div class="acts"><button class="btn sm" data-act="declineInv" data-f="${id}">Нет</button><button class="btn pri sm" data-act="acceptInv" data-f="${id}">Принять</button><button class="btn sm ghost" data-act="reportP" data-f="${id}" aria-label="Пожаловаться на ${nm}">${ico('flag', 'sm')}</button><button class="btn sm ghost" data-act="blockP" data-f="${id}" aria-label="Заблокировать ${nm}">${ico('ban', 'sm')}</button></div></div>`;
-    }).join('') + `</div>`;
+    /* Заявки — общим блоком с «Друзьями»: раньше он был только здесь, и у
+       игрока с выключенной карточкой значок «1» вёл в пустоту. */
+    h += inviteCardsHTML(true);
   } else h += `<div class="empty"><b>Карточка скрыта</b>Подтверди возраст и включи «Показывать мою карточку рядом», чтобы видеть других и стать видимым.</div>`;
   el.innerHTML = h;
 }
@@ -4134,7 +4155,7 @@ const LEGAL = {
       ['Раздел «Рядом»', 'Только для игроков от 18 лет; возраст подтверждается один раз и хранится вместе с аккаунтом. Чтобы раздел работал, приложение спрашивает у телефона грубое местоположение и сразу превращает его в номер клетки размером около 5 км — сами координаты не сохраняются и никуда не отправляются, на сервер уходит только номер клетки и то, что карточка включена. По этому номеру расстояние показывается диапазоном: до 1 км, 1–3 км, 3–5 км, больше 5 км. Точное место, район и точное расстояние не показываются никогда. Разрешение на местоположение можно не давать: карточка включится, расстояние просто не покажется. Карточку видят только те, кто включил свою; выключил — исчез из списка и номер клетки стёрт.'],
       ['Друзья и сообщения', 'Доску видят только те друзья, кому ты открыл её сам, — по одной на каждого друга; закрыл — друг больше её не видит. Переписка доступна только двоим: тому, кто написал, и тому, кому написали, и только пока вы друзья. Заблокировал — переписка исчезает из списка диалогов у обоих, и дописать в неё нельзя ни тебе, ни собеседнику. Подарки и эмоции тоже — только друзьям и только на открытую тебе доску. Приглашение приходит по коду или логину, доступ появляется после согласия. Любую карточку, сообщение и доску можно заблокировать и на них пожаловаться.'],
       ['Кому передаются данные', 'Никому, кроме обработки на нашем сервере. Нет рекламных сетей, аналитики и сторонних SDK, которые собирали бы данные о тебе. Отдельно — то, что ты отправляешь сам: кнопка «Поделиться» отдаёт картинку доски или недели тому приложению, которое ты выберешь, и дальше она живёт по правилам этого приложения, а не нашим.'],
-      ['Сколько храним', 'Пока ты не удалишь данные. Удаление аккаунта стирает его данные на сервере — вместе с перепиской, подарками и эмоциями обеих сторон (собеседник тоже перестаёт их видеть) и карточкой раздела «Рядом»; «Начать заново» и «Удалить всё» в «Бюджете» очищают записи сразу.'],
+      ['Сколько храним', 'Пока ты не удалишь данные. Удаление аккаунта стирает его данные на сервере — вместе с перепиской, подарками и эмоциями обеих сторон (собеседник тоже перестаёт их видеть) и карточкой раздела «Рядом». «Начать заново» тоже удаляет серверную запись и начинает нового игрока (друзья и заявки с прошлого раза не переносятся); «Удалить всё» в «Бюджете» очищает записи сразу.'],
       ['Дети', 'Приложение не предназначено для детей младше 13 лет. Раздел «Рядом» — только с 18 лет.'],
       ['Твои права', 'Посмотреть, изменить и удалить данные можно в приложении. Вопросы, жалобы и запросы на удаление — ' + (mailLink() ? `на почту ${mailLink()}` : 'на почту поддержки (адрес появится до выпуска)') + '.'],
       ['Изменения и контакты', 'Об изменениях сообщаем в приложении и обновляем дату вверху. ' + mailLine()]
@@ -4284,7 +4305,7 @@ const MORE_SHEETS = {
       li('trash', 'Дела, мериты, вещи и доски этого аккаунта будут удалены. Вернуть их нельзя.') +
       li('friends', 'Друзья больше не увидят этот профиль.') +
       li(last ? 'sparkle' : 'swap', last ? 'Приложение вернётся к первому запуску.' : 'Остальные аккаунты не изменятся. Место освободится.') + `</div>` +
-      (cur ? `<div class="card2" style="margin-top:10px"><b class="h" style="font-size:16px;color:var(--ink)">Нужно только начать с нуля?</b><p class="sub" style="margin-top:4px">Имя и друзья останутся. Дела, мериты, вещи и доски обнулятся.</p><button class="btn sm" style="margin-top:10px" data-act="acctRestart">Начать заново</button></div>` : '') +
+      (cur ? `<div class="card2" style="margin-top:10px"><b class="h" style="font-size:16px;color:var(--ink)">Нужно только начать с нуля?</b><p class="sub" style="margin-top:4px">Это новый игрок: дела, мериты, вещи, доски и друзья начнутся с нуля. Имя и стиль останутся. Заявки и друзья с прошлого раза не переносятся.</p><button class="btn sm" style="margin-top:10px" data-act="acctRestart">Начать заново</button></div>` : '') +
       `<div class="acts wide"><button class="btn" data-act="acctOpen">Отмена</button><button class="btn danger" data-act="acctDelDo" data-i="${sh.i}">Удалить</button></div>`;
   },
   help() {
@@ -4615,8 +4636,11 @@ const MORE_ACT = {
   tgMsgs() { S.soc.msgs = !S.soc.msgs; commit(); },
   qrep(el) { U.chatDraft = el.dataset.v; ACT.sendMsg(); },
   inbOpen(el) { if (el.dataset.sw) { delete el.dataset.sw; return; } el.classList.remove('on'); clearTimeout(U.inbT); ACT.chat({ dataset: { f: el.dataset.f } }); },
-  invOpen(el) { if (el.dataset.sw) { delete el.dataset.sw; return; } el.classList.remove('on'); clearTimeout(U.inbT); ACT.nav({ dataset: { t: 'nearby' } }); },
-  lockInv(el) { U.appOff = false; clearTimeout(U.lockT); const l = $('#lock'); if (l) l.remove(); render(); ACT.nav({ dataset: { t: 'nearby' } }); },
+  invOpen(el) { if (el.dataset.sw) { delete el.dataset.sw; return; } el.classList.remove('on'); clearTimeout(U.inbT); ACT.nav({ dataset: { t: 'friends' } }); },
+  /* Заявка при закрытом приложении: ведём на «Друзей», а не в «Рядом».
+     Причина та же: «Рядом» при выключенной карточке показывает «Карточка
+     скрыта», и нажатие на уведомление вело в тупик. */
+  lockInv(el) { U.appOff = false; clearTimeout(U.lockT); const l = $('#lock'); if (l) l.remove(); render(); ACT.nav({ dataset: { t: 'friends' } }); },
   demoMsg() { if (S.step !== 'app') return toast('Сначала пройдите первый запуск'); demoMsgSend(); },
   demoMsgOff() { if (S.step !== 'app') return toast('Сначала пройдите первый запуск'); U.sheet = null; renderSheet(); U.appOff = true; lockShow(); clearTimeout(U.lockT); U.lockT = setTimeout(demoMsgSend, 900); },
   demoInv() { if (S.step !== 'app') return toast('Сначала пройдите первый запуск'); demoInviteSend(); },
@@ -6266,17 +6290,84 @@ function accDel(i) {
   t.snap = null; ACC.cur = 0;
   accEnter(ns, 'Аккаунт удалён');
 }
+/* Имя локального аккаунта — это ВТОРАЯ половина ключа игрока на сервере
+   (deviceFull = идентификатор устройства + ':' + acctId). Поэтому имена
+   обязаны быть уникальными и не повторяться никогда.
+   Было: 'a' + (Date.now() % 1000000) — такие имена повторяются КАЖДЫЕ
+   16 минут 40 секунд (1 000 000 мс). Два «разных» аккаунта, созданные с
+   такой разницей, получали одно имя, а значит на сервере это был ОДИН
+   игрок: одна карточка «Рядом», одни друзья, одни заявки. Проверено
+   стендом (stand-threepaths: a584034 и a584034).
+   Теперь: время + случайный хвост + проверка по уже занятым именам. */
+function accNewId() {
+  const base = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  let id = base, k = 0;
+  while ((ACC.list || []).some(a => a && a.id === id)) id = base + (++k);
+  return id;
+}
+/* «Начать заново» = НОВЫЙ игрок и на телефоне, и на сервере.
+   Раньше здесь менялся только телефон: ключ игрока на сервере — это
+   идентификатор устройства + ':' + имя аккаунта (deviceFull), и оба оставались
+   прежними. Поэтому сервер узнавал ТОГО ЖЕ игрока и возвращал его состояние:
+   включённую карточку «Рядом» и висящие заявки в друзья. Владелец видел
+   «новый аккаунт», а на «Друзьях» уже горел «1» с чужой заявкой (случай
+   2026-11-23). Проверено стендом stand-threepaths.
+   Почему НЕ меняем имя аккаунта: имя 'a1' — это то, что после переустановки
+   приложения восстанавливается само (ACC пересоздаётся с 'a1'), и вместе с
+   идентификатором из Keychain оно возвращает игрока (этап 6). Переименование
+   ломало именно это: после переустановки игрок получал ЧУЖОЕ старое состояние.
+   Поэтому имя остаётся, а прежняя запись на сервере УДАЛЯЕТСЯ до нового входа:
+   следующий вход по тому же ключу заводит нового игрока. Тогда и переустановка
+   возвращает именно того игрока, которым играешь сейчас. */
 function accRestart() {
+  const id = acctId();
+  const tok = srvTokens()[id] || '';
+  /* Сервер настроен и игрок там уже есть — сначала удаляем его запись.
+     Без этого сервер узнал бы прежнего игрока (ключ тот же) и вернул его
+     карточку «Рядом» и заявки, то есть ровно то, что здесь и починили.
+     Если удалить не удалось — заново НЕ начинаем и честно говорим почему:
+     иначе на телефоне было бы пусто, а после первой же синхронизации вернулось
+     старое, и это выглядело бы как поломка. */
+  if (serverOn() && !SRV.banned && tok) {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const t = setTimeout(() => { if (ctl) ctl.abort(); }, SERVER.timeout);
+    fetch(serverBase() + '/v1/me', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + tok },
+      body: JSON.stringify({ confirm: true }),
+      signal: ctl ? ctl.signal : undefined
+    }).then(r => {
+      clearTimeout(t);
+      /* 200 — удалили. 401/404 — записи уже нет (например, удалили с другого
+         устройства): и в этом случае новый вход заведёт нового игрока. */
+      if (!r.ok && r.status !== 401 && r.status !== 404) throw new Error('http' + r.status);
+      srvTokenSet(id, ''); SRV.token = ''; SRV.ready = false;
+      accRestartLocal('Аккаунт начат заново: это новый игрок');
+    }).catch(() => {
+      clearTimeout(t);
+      MSG.push('Начать заново не получилось: сервер не отвечает. Ничего не изменено — попробуй, когда появится сеть');
+      commit();
+    });
+    return;
+  }
+  accRestartLocal('Аккаунт начат заново: это новый игрок');
+}
+/* Сам сброс на телефоне. Вынесен отдельно: он одинаков для локального режима
+   и для случая, когда серверную запись уже удалили. */
+function accRestartLocal(msg) {
   const n = fresh();
-  n.ch = Object.assign({}, S.ch); n.ob.style = S.ob.style; n.login = S.login; n.loginHold = S.loginHold; n.soc.friends = S.soc.friends.slice(); n.tips = S.tips;
+  n.ch = Object.assign({}, S.ch); n.ob.style = S.ob.style; n.login = S.login; n.loginHold = S.loginHold; n.tips = S.tips;
   n.step = 'app'; n.tab = 'today';
-  accEnter(n, 'Аккаунт начат заново');
+  accEnter(n, msg);
+  /* Имя и стиль переносим на сервер явно: без этого у нового игрока там пусто,
+     и друзья увидели бы «Игрок» без стиля. */
+  srvProfilePush();
 }
 function accAdd() {
   if (ACC.list.length >= ACC_MAX) return;
   const old = ACC.cur;
   ACC.list[ACC.cur].snap = JSON.stringify(S);
-  ACC.list.push({ id: 'a' + (Date.now() % 1000000), n: '', snap: null }); ACC.cur = ACC.list.length - 1;
+  ACC.list.push({ id: accNewId(), n: '', snap: null }); ACC.cur = ACC.list.length - 1;
   if (!accPersist()) { ACC.list.pop(); ACC.list[old].snap = null; ACC.cur = old; U.sheet = null; MSG.push('Не хватает памяти на устройстве для ещё одного аккаунта. Убери фото с досок или аватарку'); commit(); return; }
   accEnter(fresh(), '');
 }
