@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Приглашение в Meritly</title>
+  <!--
+    Страница приглашения. Адрес этой страницы приложение кладёт в буфер обмена
+    кнопкой «Скопировать ссылку»: meritlygo.github.io/meritly/invite.html?c=КОД
+
+    ПОЧЕМУ ИМЕННО ТАК (проверено 2026-11-26):
+    - meritlygo.com пока НЕ развёрнут (не отвечает), а этот адрес отвечает 200.
+      Когда сайт появится на своём домене, приложение начнёт звать его —
+      меняется одна строка INVITE_BASE в Meritly.html, а старые ссылки можно
+      перенаправить сюда же.
+    - Ссылка НЕ открывает приложение сама: для этого нужны «универсальные
+      ссылки» Apple (файл-подтверждение на домене + разрешение в сборке), а
+      разрешение выдаётся только на платном аккаунте Apple Developer. Поэтому
+      страница показывает код КРУПНО и объясняет, куда его ввести. Когда
+      аккаунт появится, эта же страница станет запасным путём для тех, у кого
+      приложение не установлено.
+
+    Код приходит в адресе (?c=...), на сервер ничего не уходит, скриптов нет:
+    обычная страница, которую видно и без интернета после загрузки.
+  -->
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1d1d1f; max-width: 560px; margin: 0 auto; padding: 32px 20px 48px; background: #0F3473; }
+    .card { background: #ffffff; border-radius: 20px; padding: 28px 24px; }
+    h1 { font-size: 24px; margin: 0 0 6px; }
+    .sub { color: #6e6e73; margin: 0 0 22px; font-size: 15px; }
+    .code { font-size: 34px; font-weight: 700; letter-spacing: .06em; text-align: center; padding: 18px 12px; border: 2px dashed #c7c7cc; border-radius: 14px; margin: 0 0 8px; word-break: break-all; }
+    .hint { text-align: center; color: #6e6e73; font-size: 14px; margin: 0 0 22px; }
+    ol { padding-left: 22px; margin: 0 0 18px; }
+    li { margin-bottom: 8px; }
+    .note { background: #f5f5f7; border-radius: 12px; padding: 14px 16px; font-size: 14px; color: #3a3a3c; margin: 0 0 18px; }
+    .btn { display: block; width: 100%; box-sizing: border-box; text-align: center; background: #0F3473; color: #ffffff; border: 0; border-radius: 999px; padding: 15px; font-size: 17px; font-weight: 600; text-decoration: none; cursor: pointer; font-family: inherit; }
+    .btn.sec { background: #f5f5f7; color: #1d1d1f; margin-top: 10px; }
+    a { color: #0066cc; }
+    footer { margin-top: 26px; font-size: 13px; color: rgba(255,255,255,.72); text-align: center; }
+    footer a { color: #ffffff; }
+    .none { color: #6e6e73; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Тебя приглашают в Meritly</h1>
+    <p class="sub">Meritly — приложение про дела и статусные вещи: закрываешь дела, получаешь Мериты и собираешь доску из вещей, о которых мечтаешь.</p>
+
+    <div id="codeBox">
+      <div class="code" id="code">—</div>
+      <p class="hint">Код пригласившего</p>
+      <button class="btn" id="copy" type="button">Скопировать код</button>
+    </div>
+
+    <div id="noCode" hidden>
+      <p class="none">В ссылке нет кода. Попроси друга прислать её ещё раз — или открой приложение и добавь его вручную.</p>
+    </div>
+
+    <h1 style="font-size:17px;margin:24px 0 10px">Как добавить друга</h1>
+    <ol>
+      <li>Открой Meritly и пройди первый запуск, если ещё не проходил.</li>
+      <li>Перейди на вкладку <strong>«Друзья»</strong>.</li>
+      <li>Нажми <strong>«Ввести код»</strong> и вставь код выше.</li>
+      <li>Нажми <strong>«Найти»</strong>, затем <strong>«Пригласить»</strong> — и подтверди, когда друг ответит.</li>
+    </ol>
+
+    <p class="note">Дружба появляется только после согласия: незнакомый видит лишь имя и стиль. Доску видят только те друзья, кому владелец открыл её сам.</p>
+
+    <a class="btn sec" href="index.html">Что такое Meritly</a>
+  </div>
+
+  <footer>
+    <a href="privacy.html">Политика конфиденциальности</a> ·
+    <a href="terms.html">Условия</a> ·
+    <a href="rules.html">Правила</a><br>
+    © 2026 Maksim Tarcheuski — Meritly
+  </footer>
+
+  <script>
+    /* Код берём из адреса. Ничего не отправляем и не храним: страница только
+       показывает то, что и так лежит в ссылке. */
+    (function () {
+      var code = '';
+      try {
+        var m = /[?&]c=([^&]+)/.exec(location.search);
+        if (m) code = decodeURIComponent(m[1].replace(/\+/g, ' ')).trim().toUpperCase();
+      } catch (e) { }
+      /* Проверяем вид кода: 2–6 знаков имени, дефис, 4 знака. Иначе показываем
+         «кода нет» — лучше честно, чем предложить скопировать мусор. */
+      var looksLikeCode = /^[А-ЯЁA-Z0-9]{2,6}-[А-ЯЁA-Z0-9]{4}$/.test(code);
+      if (!looksLikeCode) {
+        document.getElementById('codeBox').hidden = true;
+        document.getElementById('noCode').hidden = false;
+        return;
+      }
+      var codeEl = document.getElementById('code');
+      codeEl.textContent = code;
+      document.title = code + ' — приглашение в Meritly';
+      document.getElementById('copy').addEventListener('click', function () {
+        var btn = this;
+        var done = function () { btn.textContent = 'Код скопирован'; setTimeout(function () { btn.textContent = 'Скопировать код'; }, 1800); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(code).then(done, function () { done(); });
+        } else {
+          try {
+            var t = document.createElement('textarea');
+            t.value = code; document.body.appendChild(t); t.select();
+            document.execCommand('copy'); t.remove(); done();
+          } catch (e) { }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
