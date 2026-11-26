@@ -1472,6 +1472,26 @@ html,body,*{-webkit-text-size-adjust:100%!important; text-size-adjust:100%!impor
 .bgrow button::after{content:""; position:absolute; inset:-7px}
 /* ---- фильтр слов: счётчик не переносится ---- */
 .nrow .num{white-space:nowrap; flex:none}
+/* ---- НЕДОСТУПНАЯ КНОПКА НЕ «ГОРИТ» ----
+   Было так: недоступная кнопка оставалась ярким акцентом (тот же цвет, лишь
+   прозрачность 45%), а при касании загоралась ещё сильнее — у .btn.pri:hover
+   вес больше, чем у .btn[disabled], да ещё .btn.pri.wide ниже по файлу. На шаге
+   «Придумай себе имя» из-за этого «Дальше» выглядела готовой к нажатию при
+   пустом поле.
+   Стало: серая заливка и приглушённая подпись, наведение и касание не действуют.
+   БЕЗ opacity: она гасила и подпись, и заливку сразу — текст «Дальше» выходил
+   2.2:1 (не прочитать). Замер: --soft + --muted дают 5.0:1 в светлой теме и
+   6.6:1 в тёмной, а от включённой кнопки недоступная отличается в 5.2 и 7.8
+   раза — видно сразу, что нажимать нечего.
+   Правило стоит в САМОМ КОНЦЕ таблицы стилей: иначе более поздние правила
+   кнопки (.btn.pri.wide, тёмная тема) снова перекрасили бы её в акцент.
+   Это касается ВСЕХ недоступных .btn: «Купить», «Сохранить логин», «Забрать». */
+.btn[disabled],.btn:disabled{background:var(--soft) !important; color:var(--muted) !important;
+  border-color:transparent !important; box-shadow:none !important;
+  cursor:not-allowed; transform:none !important}
+.btn[disabled]:hover,.btn:disabled:hover,.btn[disabled]:active,.btn:disabled:active{
+  background:var(--soft) !important; color:var(--muted) !important;
+  transform:none !important; border-color:transparent !important}
 </style>
 <div class="stage">
   <section class="side" id="panel" aria-label="Описание и демо-кнопки"></section>
@@ -2039,7 +2059,31 @@ function renderStats(el) {
 }
 
 /* ---------- friends ---------- */
-function inviteCode() { return (S.ch.name || 'ИГРОК').toUpperCase().replace(/[^A-ZА-ЯЁ0-9]/g, '').slice(0, 6) + '-4821'; }
+/* Код друга. ПРАВИЛЬНЫЙ источник — сервер (SRV.code): он выдаёт код один раз
+   за игрока, код не меняется при смене имени и не совпадает у двух игроков
+   с одинаковым именем. Прежняя версия собирала код из ИМЕНИ и дописывала
+   зашитое «-4821»: у всех был одинаковый хвост, у тёзок — одинаковый код,
+   а переименование ломало уже отправленные ссылки (это и был дефект).
+   Локальный запасной нужен только для режима без сервера и для старой
+   серверной версии; он помечен как временный, чтобы это не приняли за
+   настоящий код. */
+function inviteCode() {
+  if (SRV.code) return SRV.code;
+  const stem = (S.ch.name || 'ИГРОК').toUpperCase().replace(/[^А-ЯЁA-Z0-9]/g, '').slice(0, 4) || 'ГЕРО';
+  return stem + '-0000';
+}
+/* Код с сервера уже получен? Без него приглашать нельзя: ссылка с «-0000»
+   выглядела бы настоящей, но никого не нашла бы. */
+const inviteCodeReady = () => !!SRV.code;
+
+/* Адрес страницы-приглашения. Ведёт на РАБОЧУЮ страницу сайта (GitHub Pages),
+   потому что meritlygo.com пока не развёрнут: проверено по сети 2026-11-26 —
+   meritlygo.com не отвечает, а meritlygo.github.io/meritly/ отвечает 200.
+   Страница показывает код крупно и объясняет, куда его ввести в приложении.
+   Когда появится сайт на meritlygo.com и платный аккаунт Apple, адрес
+   меняется ЗДЕСЬ, в одной строке, и старые ссылки можно перенаправить. */
+const INVITE_BASE = 'https://meritlygo.github.io/meritly/';
+const inviteLink = () => INVITE_BASE + 'invite.html?c=' + encodeURIComponent(inviteCode());
 /* ---- сообщения ---- */
 const CHAT_SEED = {
   mira: [[0, 'Привет! Классная доска, давно копишь?', 26], [1, 'Привет! Неделю назад начал, уже купил первую вещь.', 25.9], [0, 'Круто. Скинь, когда закроешь цель!', 25.8]],
@@ -2906,7 +2950,7 @@ const deviceFull = () => deviceGet() + ':' + acctId();
 /* Токен на каждый локальный аккаунт свой: переключение аккаунта меняет игрока.
    banned — текст ограничения, полученный от сервера: пока он не пуст, в сеть
    не стучимся повторно, а честно показываем игроку, что доступ закрыт. */
-const SRV = { token: '', playerId: '', adult: false, nearby: false, nearBusy: false, ready: false, banned: '', netFail: 0, name: '', style: '', unread: 0, uchat: {}, giftLeft: null, emoLeft: null };
+const SRV = { token: '', playerId: '', adult: false, nearby: false, nearBusy: false, ready: false, banned: '', netFail: 0, name: '', style: '', code: '', unread: 0, uchat: {}, giftLeft: null, emoLeft: null };
 function srvTokens() { try { return JSON.parse(localStorage.getItem(TOK_KEY)) || {}; } catch (_) { return {}; } }
 function srvTokenSet(id, tok) {
   const m = srvTokens();
@@ -2982,6 +3026,11 @@ function srvReady() {
          могли поменяться с другого устройства, и лучший источник правды о том,
          что лежит на сервере, — сам сервер. */
       SRV.name = p.name || ''; SRV.style = p.style || '';
+      /* Код друга приходит с СЕРВЕРА и хранится в памяти, а не в сохранении:
+         так он всегда тот же самый, даже если игрок переустановил приложение
+         или зашёл с другого устройства. Если сервер кода не прислал (старая
+         версия), остаётся локальный запасной — см. inviteCode(). */
+      SRV.code = p.friendCode || '';
       srvTokenSet(acctId(), SRV.token);
       if (p.adult && S && S.soc && !S.soc.adult) { S.soc.adult = true; save(); }   /* 18+ пережил переустановку */
       return true;
@@ -4015,7 +4064,7 @@ function srvInvite(playerId, onDone, via) {
      из «Рядом» достаточно включённой карточки, по логину нужен findable.
      Без via сервер отказывает: угадывать за клиента нельзя. По умолчанию
      'login' — это прежнее поведение, поэтому старые вызовы не ломаются. */
-  const body = { targetId: playerId, via: via === 'near' ? 'near' : 'login' };
+  const body = { targetId: playerId, via: via === 'near' ? 'near' : via === 'code' ? 'code' : 'login' };
   srvReady().then(ok => {
     if (!ok) {
       if (SRV.banned) { if (onDone) onDone('banned', SRV.banned); return; }
@@ -4063,6 +4112,21 @@ function srvFind(login, onDone) {
   srvReady().then(ok => {
     if (!ok) { if (onDone) onDone('net', null, ''); return; }
     api('GET', '/v1/players/find?login=' + encodeURIComponent(login)).then(r => {
+      if (r.ok) { const p = r.data.player; if (p) peerPut(p); if (onDone) onDone('ok', p, ''); return; }
+      if (r.off) { if (onDone) onDone('net', null, ''); return; }
+      if (onDone) onDone(r.error || 'fail', null, srvFrMsg(r.error));
+    });
+  });
+}
+/* Поиск по КОДУ друга («МАКС-7К3Р»). Отдельный вызов, а не srvFind: правила
+   другие (кириллица и дефис), и на сервере это отдельный путь. Лимит поисков
+   на сервере ОБЩИЙ с поиском по логину — перебор кодов не должен его обходить. */
+function srvFindCode(code, onDone) {
+  if (!serverOn()) { if (onDone) onDone('off', null, ''); return; }
+  if (SRV.banned) { if (onDone) onDone('banned', null, SRV.banned); return; }
+  srvReady().then(ok => {
+    if (!ok) { if (onDone) onDone('net', null, ''); return; }
+    api('GET', '/v1/players/find-code?code=' + encodeURIComponent(code)).then(r => {
       if (r.ok) { const p = r.data.player; if (p) peerPut(p); if (onDone) onDone('ok', p, ''); return; }
       if (r.off) { if (onDone) onDone('net', null, ''); return; }
       if (onDone) onDone(r.error || 'fail', null, srvFrMsg(r.error));
@@ -4357,7 +4421,14 @@ const MORE_SHEETS = {
       `<div class="acts"><button class="btn" data-act="shareLink">Скопировать ссылку</button><button class="btn pri" data-act="shareSave">Сохранить картинку</button></div>`;
   },
   addfriend() {
-    return `<h3 class="h">Код друга</h3><p class="sub">Друг присылает код или ссылку. Поиска по имени нет.</p><div class="field" style="margin-top:14px"><label for="codeIn">Код</label><input type="text" id="codeIn" data-u="codeIn" maxlength="20" placeholder="Например, МИРА-1234" autocomplete="off" value="${esc(U.codeIn || '')}"></div>${U.codeErr ? `<p class="err">${U.codeErr}</p>` : ''}<div class="acts"><button class="btn" data-act="close">Отмена</button><button class="btn pri" data-act="codeAdd">Добавить</button></div>`;
+    /* Шторка ввода кода. Результат поиска рисует общий fdResHTML — тот же, что
+       у поиска по логину: карточка человека, «Пригласить», отказы. Так код и
+       логин ведут себя одинаково, а не двумя разными способами. */
+    return `<h3 class="h">Код друга</h3><p class="sub">Друг присылает код вида МАКС-7К3Р или ссылку. Поиска по имени нет.</p>` +
+      `<div class="field" style="margin-top:14px"><label for="codeIn">Код</label><input type="text" id="codeIn" maxlength="24" placeholder="Например, МАКС-7К3Р" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc((U.cd && U.cd.v) || '')}"></div>` +
+      `<div id="cdRes">${codeResHTML()}</div>` +
+      `<p class="note" style="margin-top:8px">Код друга виден у него на экране «Друзья». Поисков сегодня: ${S.soc.findToday | 0} из ${FIND_CAP}.</p>` +
+      `<div class="acts"><button class="btn" data-act="close">Закрыть</button><button class="btn pri" data-act="codeAdd">Найти</button></div>`;
   },
   /* Подтверждение блокировки. Кнопка «Заблокировать» стоит в четырёх местах —
      профиль друга, чат, «Рядом», входящее приглашение, — и все они идут через
@@ -4593,16 +4664,35 @@ function moneySample() {
 const MORE_ACT = {
   nav(el) { if (el.dataset.t === 'week') U.wkFrom = famOf(S.tab) === 'more' ? 'more' : 'today'; S.tab = el.dataset.t; if (el.dataset.f) U.fid = el.dataset.f; if (S.tab !== 'friend') U.fid = ''; U.sel = null; commit(); if (S.tab === 'nearby' && !S.soc.adult) { U.adultOk = false; U.sheet = { type: 'near' }; renderSheet(); } if (S.tab === 'nearby' && S.soc.adult && serverOn() && S.soc.nearby) srvNearLoad(() => { if (S.tab === 'nearby') renderScreen(); }); if (S.tab === 'friend' && U.fid) { srvFriendBoard(U.fid, () => { if (S.tab === 'friend') renderScreen(); }); srvFriendSocial(U.fid, () => { if (S.tab === 'friend') renderScreen(); }); } if (S.tab === 'board') srvMySocial(S.bi, () => { if (S.tab === 'board') renderScreen(); }); },
   copyLink() {
-    const link = 'lifegame.app/i/' + inviteCode();
+    /* Без кода с сервера ссылку не даём: «-0000» выглядела бы настоящей,
+       но не нашла бы никого. Честнее сказать, что код ещё не готов. */
+    if (!inviteCodeReady()) { toast('Код друга ещё не получен: нужна связь с сервером'); return; }
+    const link = inviteLink();
     try { navigator.clipboard.writeText(link).then(() => toast('Ссылка скопирована'), () => toast('Ссылка: ' + link)); } catch (e) { toast('Ссылка: ' + link); }
   },
-  codeOpen() { U.codeIn = ''; U.codeErr = ''; U.sheet = { type: 'addfriend' }; renderSheet(); },
+  codeOpen() { U.cd = { v: '', res: null }; U.sheet = { type: 'addfriend' }; renderSheet(); },
+  /* Ввод кода друга. Раньше здесь была ЗАГЛУШКА: код «принимался» всегда и
+     добавлял выдуманного друга из PEOPLE (tim/vera) — то есть работал без
+     сервера и без второго игрока вовсе. Теперь код ищется на сервере так же,
+     как логин, и дальше человек приглашается обычным приглашением: дружба
+     появляется только после его согласия. Без сервера честно говорим, что
+     поиск невозможен: код знает только сервер. */
   codeAdd() {
-    const v = tidy(U.codeIn); if (v.length < 4) { U.codeErr = 'Введи код целиком.'; return renderSheet(); }
-    const next = ['tim', 'vera'].find(id => !S.soc.friends.includes(id) && !isBlocked(id));
-    if (!next) { U.codeErr = 'Все друзья из примера уже добавлены.'; return renderSheet(); }
-    S.soc.friends.push(next); U.sheet = null; U.codeErr = ''; MSG.push(`${PEOPLE[next].n} теперь в друзьях`); commit();
+    const f = U.cd, v = String(f.v || '').trim().toUpperCase();
+    if (v.length < 5) { f.res = { t: 'short' }; return renderSheet(); }
+    if (!serverOn() || SRV.banned) { f.res = { t: 'net' }; return renderSheet(); }
+    f.res = null; f.busy = true; renderSheet();
+    srvFindCode(v, (state, p, why) => {
+      f.busy = false;
+      if (state === 'ok') f.res = p ? { t: 'ok', id: peerIdOf(p.playerId) } : { t: 'none' };
+      else if (state === 'net') f.res = { t: 'net' };
+      else if (state === 'banned') f.res = { t: 'banned', why: why || '' };
+      else f.res = { t: 'err', why: why || srvFrMsg(state) };
+      save(); renderSheet();
+    });
   },
+  /* Приглашение найденного по коду идёт через общий findInv (он в LOGIN_ACT):
+     отдельный обработчик не нужен — карточку рисует тот же fdResHTML. */
   /* Шторка «кому видна доска»: открывается из вкладки «Доска». */
   shareOpen() { U.sheet = { type: 'share' }; renderSheet(); },
   /* Доступ «к текущей доске» конкретному другу: он видит ту доску, что у меня
@@ -4839,10 +4929,12 @@ const MORE_ACT = {
     S.soc.inv[id] = 'sent'; S.soc.invToday++;
     const okMsg = 'Приглашение отправлено. Общение откроется, если человек согласится';
     /* Откуда приглашение, решает САМА КНОПКА: data-via="near" стоит у «Дружить»
-       в разделе «Рядом», у кнопки в поиске по логину атрибута нет — значит
-       'login'. Обе кнопки зовут эту же функцию (ACT собирается из MORE_ACT),
-       поэтому различать их можно только по разметке. */
-    const via = el.dataset.via === 'near' ? 'near' : 'login';
+       в разделе «Рядом», data-via="code" — у «Пригласить» после поиска по коду,
+       у кнопки в поиске по логину атрибута нет — значит 'login'. Обе кнопки
+       зовут эту же функцию (ACT собирается из MORE_ACT), поэтому различать их
+       можно только по разметке. Путь «по коду» не требует включённого поиска:
+       человек сам прислал код, значит уже согласен на приглашение. */
+    const via = el.dataset.via === 'near' ? 'near' : el.dataset.via === 'code' ? 'code' : 'login';
     /* Без сервера поведение прежнее: приглашение ставится локально. С сервером
        он один решает, можно ли звать, — и при отказе пометка снимается:
        обещать отправленное приглашение, которого нет, значит обмануть.
@@ -5097,7 +5189,9 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'chatIn' && U.sheet && U.sheet.type === 'chat') { e.preventDefault(); ACT.sendMsg(); }
-  else if (e.key === 'Enter' && e.target.id === 'codeIn') { e.preventDefault(); ACT.codeAdd(); }
+  /* Enter на поле кода обрабатывается НИЖЕ, вместе с поиском по логину: один
+     обработчик на оба поля. Второй здесь означал бы ДВА поиска на одно
+     нажатие — а поиск тратит суточный лимит. */
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'tgChk') { S.soc.tg = e.target.checked; commit(); }
@@ -5831,6 +5925,25 @@ function loginSection() {
 }
 
 /* ---------- sheets ---------- */
+/* Результат поиска по КОДУ. Карточку человека и кнопку «Пригласить» берём у
+   fdResHTML — не дублируем разметку: иначе код и логин разошлись бы в
+   поведении. Здесь только те состояния, которых у логина нет: короткий код. */
+function codeResHTML() {
+  const f = U.cd || {}, r = f.res;
+  if (f.busy) return `<p class="lgmsg" style="margin-top:12px">Ищем на сервере…</p>`;
+  if (!r) return '';
+  if (r.t === 'short') return `<p class="lgmsg" style="margin-top:12px">Код друга выглядит как МАКС-7К3Р: четыре знака имени, дефис, четыре знака. Проверь, что скопировал его целиком.</p>`;
+  /* Дальше состояния совпадают с поиском по логину: подменяем U.fd на время
+     вызова — это тот же объект состояния, что у поиска, и так одна разметка
+     обслуживает оба экрана. Поле via='code' говорит карточке, что «Пригласить»
+     надо слать путём «по коду»: он не требует включённого поиска по логину,
+     потому что код человек прислал сам. */
+  const keep = U.fd;
+  U.fd = Object.assign({}, f, { via: 'code' });
+  const html = fdResHTML();
+  U.fd = keep;
+  return html;
+}
 function fdResHTML() {
   const f = U.fd || {}, r = f.res;
   if (f.busy) return `<p class="lgmsg" style="margin-top:12px">Ищем на сервере…</p>`;
@@ -5846,7 +5959,7 @@ function fdResHTML() {
   const id = r.id, p = PEOPLE[id] || {};
   const fr = S.soc.friends.includes(id), sent = S.soc.inv[id] === 'sent';
   return `<div class="near" style="margin-top:12px">${personAva(id)}<span class="rt"><b style="font-weight:600">${esc(p.n || 'Игрок')}</b><small>${styleName(p.style)}</small></span>` +
-    (fr ? `<span class="pill">В друзьях</span>` : sent ? `<span class="pill">Отправлено</span>` : `<button class="btn pri sm" data-act="findInv" data-f="${id}" ${S.soc.invToday >= INVITE_CAP ? 'disabled' : ''}>Пригласить</button>`) +
+    (fr ? `<span class="pill">В друзьях</span>` : sent ? `<span class="pill">Отправлено</span>` : `<button class="btn pri sm" data-act="findInv" data-f="${id}"${f.via === 'code' ? ' data-via="code"' : ''} ${S.soc.invToday >= INVITE_CAP ? 'disabled' : ''}>Пригласить</button>`) +
     `</div><p class="note" style="margin-top:8px">Незнакомый видит только карточку. Доступ как у друга появится после согласия.</p>`;
 }
 Object.assign(MORE_SHEETS, {
@@ -5940,8 +6053,15 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'lgIn' && U.lg) { U.lg.v = t.value; S.loginWarn = null; SRV_LG.note = ''; lgLive(); }
   else if (t.id === 'fdIn' && U.fd) { U.fd.v = t.value; }
+  /* Поле кода: пишем в U.cd, а не в U.fd — у поиска по коду своё состояние,
+     иначе введённый код подменял бы строку поиска по логину. */
+  else if (t.id === 'codeIn' && U.cd) { U.cd.v = t.value; if (U.cd.res) { U.cd.res = null; const box = document.getElementById('cdRes'); if (box) box.innerHTML = ''; } }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'fdIn') { e.preventDefault(); LOGIN_ACT.findGo(); } });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  if (e.target.id === 'fdIn') { e.preventDefault(); LOGIN_ACT.findGo(); }
+  if (e.target.id === 'codeIn') { e.preventDefault(); MORE_ACT.codeAdd(); }
+});
 
 /* ================= rules (from the "Механика игры" document) ================= */
 const DIFF = [
@@ -6068,10 +6188,16 @@ ITEMS.forEach(i => { i.sty = (STY_RAW[i.id] || '').split(' ').filter(Boolean); }
 const KEY = 'lifegame-proto-v7', KEY_V6 = 'lifegame-proto-v6';
 
 /* ---------- date utilities ---------- */
+/* Номер суток — МЕСТНАЯ календарная дата игрока: новый день начинается в 00:00
+   по его часам, как в жизни. Раньше часы брались местные (getHours), а дата по
+   UTC (toISOString) — два пояса в одном выражении. Из-за этого в поясах
+   восточнее Гринвича номер дня откатывался на 1–2 дня назад в полночь, а
+   западнее прыгал на завтра вечером (замер: Минск 21:00, Токио 02:00, Лос-Анджелес
+   16:00). Формат YYYY-MM-DD сохранён: от него зависят daysSince, visits и
+   сохранения игроков. Механика (Мериты, опыт, серии, лимиты) не менялась. */
 const todayISO = () => {
   const d = new Date();
-  if (d.getHours() < 4) d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 };
 const daysSince = (from, to) => {
   if (!from || !to) return 0;
@@ -6870,15 +6996,20 @@ const loadImg = src => new Promise(res => { const i = new Image(); i.onload = ()
 function rr(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 const SHARE_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 function shareFileName(prefix) { return `meritly-${prefix}-${new Date().toISOString().slice(0, 10)}.png`; }
-/* картинка отдаётся в системное «Поделиться», а если его нет — скачивается файлом */
-function shareImage(dataUrl, name, text) {
+/* картинка отдаётся в системное «Поделиться», а если его нет — скачивается файлом.
+   Подпись (второй аргумент «text») НЕ передаётся намеренно: iOS в окне «Поделиться»
+   не кладёт текст внутрь картинки, а сохраняет рядом отдельный файл .txt с этой
+   строкой. Владелец видел его при сохранении доски: рядом с картинкой появлялся
+   «текст.txt» с «Доска «Доска 1» в Meritly». Всё важное и так нарисовано на самой
+   картинке, поэтому в систему уходит ТОЛЬКО файл. */
+function shareImage(dataUrl, name) {
   try {
     const m = /^data:(.*?);base64,(.*)$/.exec(dataUrl || '');
     if (m && window.File && navigator.canShare) {
       const bin = atob(m[2]), u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
       const file = new File([u8], name, { type: m[1] || 'image/png' });
-      if (navigator.canShare({ files: [file] })) { navigator.share({ files: [file], text }).catch(() => { }); return true; }
+      if (navigator.canShare({ files: [file] })) { navigator.share({ files: [file] }).catch(() => { }); return true; }
     }
   } catch (_) { }
   try {
@@ -6986,12 +7117,12 @@ async function shareBoardImage() {
   const b = curBoard();
   if (!b) return;
   toast('Собираю картинку…');
-  try { shareImage(await boardImageData(b), shareFileName('board'), `Доска «${boardName(S.bi)}» в Meritly`); }
+  try { shareImage(await boardImageData(b), shareFileName('board')); }
   catch (e) { toast('Не получилось собрать картинку'); }
 }
 async function shareWcardImage(C) {
   toast('Собираю картинку…');
-  try { shareImage(await wcardImageData(C), shareFileName('week'), `Неделя ${C.week} в Meritly`); }
+  try { shareImage(await wcardImageData(C), shareFileName('week')); }
   catch (e) { toast('Не получилось собрать картинку'); }
 }
 
@@ -8040,7 +8171,15 @@ const ACT = {
   fsOpen() { openFs(); },
   fsAdd() { if (!U.fs) return; U.fs.add = !U.fs.add; if (U.fs.add) U.sel = null; renderFs(); },
   shareBoard() { U.sheet = { type: 'shareimg' }; renderSheet(); },
-  shareLink() { const link = 'lifegame.app/b/' + inviteCode(); try { navigator.clipboard.writeText(link).then(() => toast('Ссылка на доску скопирована'), () => toast('Ссылка: ' + link)); } catch (e) { toast('Ссылка: ' + link); } },
+  shareLink() {
+    /* Ссылка на доску ведёт на ту же страницу приглашения: доску видит только
+       ДРУГ (это правило доступа, его не обойти ссылкой), поэтому первым шагом
+       человек добавляется в друзья по коду, а доску открывает сам владелец.
+       Прежний адрес lifegame.app/b/ не существовал ни на сайте, ни на сервере. */
+    if (!inviteCodeReady()) { toast('Код друга ещё не получен: нужна связь с сервером'); return; }
+    const link = inviteLink();
+    try { navigator.clipboard.writeText(link).then(() => toast('Ссылка на доску скопирована'), () => toast('Ссылка: ' + link)); } catch (e) { toast('Ссылка: ' + link); }
+  },
   shareSave() { shareBoardImage(); },
   fsClose() { closeFs(); },
   fsIn() { fsZoomBy(1.25); },
